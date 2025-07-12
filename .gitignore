@@ -1,0 +1,12 @@
+myenv
+__pycache__
+processed
+processed_videos
+streaming_cache
+storage
+temp_storage
+sample_vid_medium.*
+sample_video_large .*
+sixty.mp4
+thirty.mp4
+upload_utilites.py
