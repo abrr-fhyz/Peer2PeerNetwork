@@ -1,20 +1,36 @@
 import os
 import time
-import threading
-import subprocess
 from pathlib import Path
 import streamlit as st
 import socket
 import json
 import requests
-from file_processor import FileProcessor
-from dht_node import DHT
-from peer_node import Peer
+from util.file_processor import FileProcessor
+from util.dht_node import DHT
+from util.peer_node import Peer
+from util.peer_controller import PeerController
 
 # Configuration
+HOST_IP = "localhost" 
 OUTPUT_DIR = "processed_videos"
 CHUNK_SIZE = 1024 * 1024  # 1MB chunks
-MIN_BUFFER_CHUNKS = 5  # Start playback after this many chunks are buffered
+MIN_BUFFER_CHUNKS = 5 
+
+def load_css():
+    """Load CSS from external file"""
+    try:
+        with open("layout/styles.css", "r") as f:
+            return f"<style>{f.read()}</style>"
+    except FileNotFoundError:
+        return "<style>/* CSS file not found */</style>"
+
+def load_upload_section_html():
+    """Load upload section HTML from external file"""
+    try:
+        with open("layout/upload_section.html", "r") as f:
+            return f.read()
+    except FileNotFoundError:
+        return "<div>Upload section HTML not found</div>"
 
 # Streamlit page config
 st.set_page_config(
@@ -24,65 +40,18 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS
-st.markdown("""
-<style>
-    .main > div {
-        padding-top: 1rem;
-    }
-    .upload-section {
-        background: #f8f9fa;
-        padding: 2rem;
-        border-radius: 10px;
-        border: 2px dashed #007bff;
-        text-align: center;
-        margin: 1rem 0;
-    }
-    .video-card {
-        background: #f8f9fa;
-        padding: 1rem;
-        border-radius: 0.5rem;
-        border: 1px solid #dee2e6;
-        margin-bottom: 1rem;
-    }
-    .status-success {
-        color: #28a745;
-        font-weight: bold;
-    }
-    .status-warning {
-        color: #ffc107;
-        font-weight: bold;
-    }
-    .status-error {
-        color: #dc3545;
-        font-weight: bold;
-    }
-    .status-info {
-        color: #17a2b8;
-        font-weight: bold;
-    }
-</style>
-""", unsafe_allow_html=True)
+# Load and apply external CSS
+st.markdown(load_css(), unsafe_allow_html=True)
 
 class VideoStreamer:
     def __init__(self):
         self.file_processor = FileProcessor(chunk_size=CHUNK_SIZE)
         Path(OUTPUT_DIR).mkdir(exist_ok=True)
 
-def run_dht_node():
-    dht = DHT(host="localhost", port=8000)
-    dht.start()
-    return dht
-
-def run_peer_node(port):
-    peer = Peer(host="localhost", port=port, dht_host="localhost", dht_port=8000)
-    peer.start()
-    return peer
-
 def check_streaming_server():
     """Check if streaming server is available"""
     try:
-        response = requests.get("http://localhost:8080/api/videos", timeout=2)
+        response = requests.get(f"http://{HOST_IP}:8080/api/videos", timeout=2)
         return response.status_code == 200
     except:
         return False
@@ -90,7 +59,7 @@ def check_streaming_server():
 def get_videos_from_server():
     """Get videos from streaming server"""
     try:
-        response = requests.get("http://localhost:8080/api/videos", timeout=5)
+        response = requests.get(f"http://{HOST_IP}:8080/api/videos", timeout=5)
         if response.status_code == 200:
             return response.json()
     except:
@@ -100,7 +69,7 @@ def get_videos_from_server():
 def get_streaming_status(video_id):
     """Get streaming status for a video"""
     try:
-        response = requests.get(f"http://localhost:8080/api/stream-status/{video_id}", timeout=2)
+        response = requests.get(f"http://{HOST_IP}:8080/api/stream-status/{video_id}", timeout=2)
         if response.status_code == 200:
             return response.json()
     except:
@@ -110,7 +79,7 @@ def get_streaming_status(video_id):
 def trigger_stream(video_id):
     """Trigger stream initialization by sending HEAD request"""
     try:
-        response = requests.head(f"http://localhost:8080/stream/{video_id}", timeout=10)
+        response = requests.head(f"http://{HOST_IP}:8080/stream/{video_id}", timeout=10)
         return response.status_code in [200, 206]
     except Exception as e:
         print(f"Failed to trigger stream: {e}")
@@ -120,7 +89,7 @@ def upload_video_to_server(uploaded_file):
     """Upload video file to streaming server"""
     try:
         files = {"file": (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)}
-        response = requests.post("http://localhost:8080/upload", files=files, timeout=300)  # 5 min timeout
+        response = requests.post(f"http://{HOST_IP}:8080/upload", files=files, timeout=300)  # 5 min timeout
         
         if response.status_code == 200:
             return response.json()
@@ -136,15 +105,18 @@ def main():
     with st.sidebar:
         st.header("🔧 System Status")
         
-        # Initialize components
-        if 'components_started' not in st.session_state:
+        # Initialize components using PeerController
+        if 'peer_controller' not in st.session_state:
             with st.spinner("Starting P2P services..."):
                 try:
-                    st.session_state.dht = run_dht_node()
-                    time.sleep(1)
-                    st.session_state.peer1 = run_peer_node(9001)
-                    st.session_state.peer2 = run_peer_node(9002)
-                    st.session_state.peer3 = run_peer_node(9003)
+                    # Use PeerController to manage single peer
+                    st.session_state.peer_controller = PeerController(
+                        peer_host=HOST_IP, 
+                        peer_port=9001,  # Single peer on port 9001
+                        dht_host=HOST_IP, 
+                        dht_port=8000
+                    )
+                    st.session_state.peer_controller.start_services()
                     st.session_state.streamer = VideoStreamer()
                     st.session_state.components_started = True
                     time.sleep(2)
@@ -164,7 +136,7 @@ def main():
         # System info
         if st.session_state.get('components_started', False):
             st.info("📡 DHT Node: Active")
-            st.info("🔗 Peer Nodes: 3 active")
+            st.info("🔗 Peer Node: 1 active (discovering others)")
         
         if st.button("🔄 Refresh Status"):
             st.rerun()
@@ -176,32 +148,33 @@ def main():
     with tab1:
         st.header("🎥 Video Library")
         
-        # Get videos from server
+        # Get videos from server or DHT
         if server_running:
             videos = get_videos_from_server()
         else:
-            # Fallback to DHT query
             videos = []
-            try:
-                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-                    sock.connect(("localhost", 8000))
-                    message = {'type': 'get_videos'}
-                    sock.send(json.dumps(message).encode())
+            if st.session_state.get('peer_controller'):
+                try:
+                    # Use peer_controller's list_videos method
+                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                        sock.connect((HOST_IP, 8000))
+                        message = {'type': 'get_videos'}
+                        sock.send(json.dumps(message).encode())
 
-                    data = b''
-                    while True:
-                        chunk = sock.recv(4096)
-                        if not chunk:
-                            break
-                        data += chunk
-                        try:
-                            response = json.loads(data.decode())
-                            videos = response.get('videos', [])
-                            break
-                        except json.JSONDecodeError:
-                            continue
-            except Exception as e:
-                st.error(f"Failed to get videos from DHT: {e}")
+                        data = b''
+                        while True:
+                            chunk = sock.recv(4096)
+                            if not chunk:
+                                break
+                            data += chunk
+                            try:
+                                response = json.loads(data.decode())
+                                videos = response.get('videos', [])
+                                break
+                            except json.JSONDecodeError:
+                                continue
+                except Exception as e:
+                    st.error(f"Failed to get videos from DHT: {e}")
         
         if not videos:
             st.info("📂 No videos available. Upload a video to get started!")
@@ -261,7 +234,7 @@ def main():
                             status_placeholder.success("✅ Stream ready! Starting playback...")
                             
                             # Show video player
-                            streaming_url = f"http://localhost:8080/stream/{video_id}"
+                            streaming_url = f"http://{HOST_IP}:8080/stream/{video_id}"
                             st.video(streaming_url)
                             
                             # Control buttons
@@ -298,13 +271,8 @@ def main():
             st.error("❌ Streaming server must be running to upload videos")
             st.write("Start the server with: `python streaming_server.py`")
         else:
-            st.markdown("""
-            <div class="upload-section">
-                <h3>🎬 Upload Your Video</h3>
-                <p>Supported formats: MP4, AVI, MOV, MKV</p>
-                <p>Your video will be processed into chunks and distributed across the P2P network</p>
-            </div>
-            """, unsafe_allow_html=True)
+            # Load upload section HTML from external file
+            st.markdown(load_upload_section_html(), unsafe_allow_html=True)
             
             # File uploader
             uploaded_file = st.file_uploader(
@@ -385,7 +353,7 @@ def main():
                     if st.button("🧪 Test Stream"):
                         test_video_id = video_options[selected_video]
                         try:
-                            response = requests.head(f"http://localhost:8080/stream/{test_video_id}", timeout=5)
+                            response = requests.head(f"http://{HOST_IP}:8081/stream/{test_video_id}", timeout=5)
                             st.success(f"✅ Stream test successful: {response.status_code}")
                             
                             # Check status
@@ -418,7 +386,7 @@ def main():
                     # Component stats
                     if st.session_state.get('components_started', False):
                         st.write("**DHT node:** 🟢 Running")
-                        st.write("**Peer nodes:** 🟢 3 active")
+                        st.write("**Peer node:** 🟢 1 active")
                     else:
                         st.write("**P2P services:** 🔴 Offline")
                         
@@ -440,7 +408,7 @@ def main():
         if st.button("📡 Call API"):
             if server_running:
                 try:
-                    response = requests.get(f"http://localhost:8080{api_endpoint}")
+                    response = requests.get(f"http://{HOST_IP}:8080{api_endpoint}")
                     st.write(f"**Status:** {response.status_code}")
                     st.json(response.json())
                 except Exception as e:

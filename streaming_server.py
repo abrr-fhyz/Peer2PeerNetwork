@@ -8,7 +8,7 @@ import os
 import json
 import socket
 from typing import Dict
-from file_processor import FileProcessor
+from util.file_processor import FileProcessor
 import threading
 import time
 
@@ -29,162 +29,7 @@ active_streams: Dict[str, dict] = {}
 
 @app.get("/", response_class=HTMLResponse)
 async def home():
-    return """
-    <html>
-        <head>
-            <title>NetFlacks Progressive Streaming - Fixed Seeking</title>
-            <style>
-                body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; background: #1a1a1a; color: #fff; }
-                video { width: 100%; background: #000; }
-                .video-item { margin-bottom: 20px; border: 1px solid #333; padding: 10px; border-radius: 5px; background: #2a2a2a; }
-                .play-btn { background: #e50914; color: white; border: none; padding: 12px 24px; border-radius: 4px; cursor: pointer; font-size: 16px; }
-                .play-btn:hover { background: #f40612; }
-                .status { margin-top: 10px; padding: 10px; border-radius: 4px; font-size: 14px; }
-                .status.buffering { background: #ffa500; color: #000; }
-                .status.ready { background: #4caf50; color: #fff; }
-                .progress-bar { width: 100%; height: 4px; background: #333; border-radius: 2px; margin: 10px 0; overflow: hidden; }
-                .progress-fill { height: 100%; background: #e50914; transition: width 0.3s; width: 0%; }
-                .seeking-note { background: #333; padding: 10px; border-radius: 4px; margin: 10px 0; font-size: 12px; }
-            </style>
-        </head>
-        <body>
-            <h1>🎬 NetFlacks Progressive Streaming - Fixed Seeking</h1>
-            <div class="seeking-note">
-                <strong>Progressive Streaming:</strong> Video starts after downloading first 3 chunks (~3MB). 
-                Seeking will work progressively as more chunks download in background.
-            </div>
-            <div id="videos"></div>
-            
-            <script>
-                async function loadVideos() {
-                    try {
-                        const response = await fetch('/api/videos');
-                        const videos = await response.json();
-                        
-                        const container = document.getElementById('videos');
-                        container.innerHTML = '';
-                        
-                        if (videos.length === 0) {
-                            container.innerHTML = '<p>No videos available.</p>';
-                            return;
-                        }
-                        
-                        videos.forEach(video => {
-                            const div = document.createElement('div');
-                            div.className = 'video-item';
-                            div.innerHTML = `
-                                <h3>${video.filename}</h3>
-                                <p>Chunks: ${video.chunks} | ID: ${video.video_id}</p>
-                                <button onclick="playVideo('${video.video_id}')" id="btn-${video.video_id}" class="play-btn">
-                                    ⚡ Progressive Play
-                                </button>
-                                <div id="status-${video.video_id}" class="status" style="display: none;"></div>
-                                <div id="progress-${video.video_id}" class="progress-bar" style="display: none;">
-                                    <div class="progress-fill"></div>
-                                </div>
-                                <div id="player-${video.video_id}" style="margin-top: 10px; display: none;">
-                                    <video controls id="video-${video.video_id}" width="640" preload="metadata"></video>
-                                </div>
-                            `;
-                            container.appendChild(div);
-                        });
-                    } catch (error) {
-                        console.error('Failed to load videos:', error);
-                    }
-                }
-                
-                function playVideo(videoId) {
-                    const btn = document.getElementById(`btn-${videoId}`);
-                    const status = document.getElementById(`status-${videoId}`);
-                    const progress = document.getElementById(`progress-${videoId}`);
-                    const player = document.getElementById(`player-${videoId}`);
-                    const video = document.getElementById(`video-${videoId}`);
-                    
-                    btn.disabled = true;
-                    btn.textContent = 'Starting download...';
-                    status.style.display = 'block';
-                    progress.style.display = 'block';
-                    status.className = 'status buffering';
-                    status.textContent = 'Downloading first chunks for immediate playback...';
-                    
-                    // Start progressive streaming immediately
-                    fetch(`/stream/${videoId}`, { method: 'HEAD' }).then(() => {
-                        console.log('Stream initialization started');
-                    });
-                    
-                    // Monitor and start video ASAP
-                    const checkInterval = setInterval(async () => {
-                        try {
-                            const response = await fetch(`/api/stream-status/${videoId}`);
-                            const statusData = await response.json();
-                            
-                            const progressFill = progress.querySelector('.progress-fill');
-                            progressFill.style.width = `${statusData.progress}%`;
-                            
-                            if (statusData.ready && !video.src) {
-                                // IMMEDIATELY start video when ready
-                                clearInterval(checkInterval);
-                                
-                                status.className = 'status ready';
-                                status.textContent = 'Playing! Background download continues...';
-                                btn.textContent = '🎬 Streaming';
-                                
-                                player.style.display = 'block';
-                                video.src = `/stream/${videoId}`;
-                                video.load();
-                                
-                                // Add seeking event handlers
-                                video.addEventListener('seeking', () => {
-                                    console.log('User seeking to:', video.currentTime);
-                                });
-                                
-                                video.addEventListener('seeked', () => {
-                                    console.log('Seek completed at:', video.currentTime);
-                                });
-                                
-                                video.addEventListener('error', (e) => {
-                                    console.error('Video error:', e);
-                                    status.className = 'status error';
-                                    status.textContent = 'Playback error - try refreshing';
-                                });
-                                
-                                video.play().catch(e => console.log('Autoplay blocked:', e));
-                                
-                                // Continue showing background progress
-                                const bgInterval = setInterval(async () => {
-                                    const bgResponse = await fetch(`/api/stream-status/${videoId}`);
-                                    const bgStatus = await bgResponse.json();
-                                    progressFill.style.width = `${bgStatus.progress}%`;
-                                    
-                                    if (bgStatus.progress >= 100) {
-                                        clearInterval(bgInterval);
-                                        status.textContent = 'Streaming complete! Full seeking available.';
-                                        setTimeout(() => {
-                                            status.style.display = 'none';
-                                            progress.style.display = 'none';
-                                        }, 3000);
-                                    } else {
-                                        status.textContent = `Playing! Downloaded: ${bgStatus.downloaded}/${bgStatus.total} chunks (${bgStatus.progress.toFixed(1)}%)`;
-                                    }
-                                }, 1000);
-                                
-                            } else {
-                                status.textContent = `Buffering: ${statusData.downloaded}/${statusData.total} chunks`;
-                            }
-                        } catch (error) {
-                            clearInterval(checkInterval);
-                            status.textContent = 'Stream failed';
-                            btn.disabled = false;
-                            btn.textContent = '⚡ Retry';
-                        }
-                    }, 200); // Check every 200ms for fast response
-                }
-                
-                window.onload = loadVideos;
-            </script>
-        </body>
-    </html>
-    """
+    return load_html()
 
 @app.get("/api/videos")
 async def list_videos():
@@ -552,14 +397,20 @@ async def generate_progressive_stream_fixed(video_id: str):
 async def upload_video(file: UploadFile = File(...)):
     logger.info(f"[Upload] Upload started for {file.filename}")
     temp_path = f"temp_{file.filename}"
-    with open(temp_path, "wb") as f:
-        content = await file.read()
-        f.write(content)
-
+    
     try:
+        # Save uploaded file
+        with open(temp_path, "wb") as f:
+            content = await file.read()
+            f.write(content)
+        
+        logger.info(f"[Upload] File saved: {temp_path} ({len(content)} bytes)")
+
+        # Process video into chunks
         metadata = file_processor.process_video(temp_path)
         logger.info(f"[Upload] Processed: {metadata.filename} with {len(metadata.chunks)} chunks")
 
+        # Register with DHT
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             sock.connect(('localhost', 8000))
             message = {
@@ -569,11 +420,98 @@ async def upload_video(file: UploadFile = File(...)):
                 'chunk_hashes': [chunk['hash'] for chunk in metadata.chunks]
             }
             sock.send(json.dumps(message).encode())
+            
+            # Wait for DHT response
+            data = b''
+            while True:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                data += chunk
+                try:
+                    response = json.loads(data.decode())
+                    logger.info(f"[Upload] DHT registration: {response}")
+                    break
+                except json.JSONDecodeError:
+                    continue
 
-        return {"status": "success", "video_id": metadata.video_id}
+        # Distribute chunks to peers
+        await distribute_chunks_to_peers(metadata)
+        
+        logger.info(f"[Upload] Upload complete for {metadata.video_id}")
+        return {"status": "success", "video_id": metadata.video_id, "filename": metadata.filename}
+        
+    except Exception as e:
+        logger.error(f"[Upload] Upload failed: {e}")
+        return {"status": "error", "message": str(e)}
     finally:
         if os.path.exists(temp_path):
             os.remove(temp_path)
+
+async def distribute_chunks_to_peers(metadata):
+    """Distribute chunks to available peers"""
+    logger.info(f"[Upload] Distributing {len(metadata.chunks)} chunks to peers")
+    
+    distributed_count = 0
+    for i, chunk_info in enumerate(metadata.chunks):
+        chunk_data = file_processor.get_chunk_data(metadata.video_id, chunk_info['index'])
+        if not chunk_data:
+            continue
+            
+        try:
+            # Get placement from DHT
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.connect(('localhost', 8000))
+                message = {
+                    'type': 'get_placement',
+                    'chunk_hash': chunk_info['hash']
+                }
+                sock.send(json.dumps(message).encode())
+                
+                data = b''
+                while True:
+                    chunk = sock.recv(4096)
+                    if not chunk:
+                        break
+                    data += chunk
+                    try:
+                        response = json.loads(data.decode())
+                        break
+                    except json.JSONDecodeError:
+                        continue
+            
+            # Send to target peers
+            target_peers = response.get('target_peers', [])
+            for target_peer in target_peers:
+                try:
+                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as peer_sock:
+                        peer_sock.connect((target_peer['host'], target_peer['port']))
+                        message = {
+                            'type': 'store_chunk',
+                            'chunk_hash': chunk_info['hash'],
+                            'chunk_data': chunk_data.hex()
+                        }
+                        peer_sock.send(json.dumps(message).encode())
+                        
+                        # Wait for response
+                        response_data = peer_sock.recv(1024)
+                        if response_data:
+                            distributed_count += 1
+                            
+                except Exception as e:
+                    logger.warning(f"[Upload] Failed to send chunk to {target_peer}: {e}")
+                    
+        except Exception as e:
+            logger.error(f"[Upload] Error distributing chunk {i}: {e}")
+    
+    logger.info(f"[Upload] Distributed {distributed_count}/{len(metadata.chunks)} chunks")
+
+def load_html():
+    try:
+        with open("layout/home.html", "r") as f:
+            return f.read()
+    except FileNotFoundError:
+        return "<div>Home HTML not found</div>"
 
 if __name__ == "__main__":
     import uvicorn

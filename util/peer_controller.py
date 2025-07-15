@@ -2,9 +2,9 @@ import json
 import socket
 import time
 from pathlib import Path
-from dht_node import DHT
-from peer_node import Peer
-from file_processor import FileProcessor
+from util.dht_node import DHT
+from util.peer_node import Peer
+from util.file_processor import FileProcessor
 
 class PeerController:
     def __init__(self, peer_host="localhost", peer_port=9000, dht_host="localhost", dht_port=8000):
@@ -181,15 +181,3 @@ class PeerController:
             elif choice == '4':
                 self.stop_services()
                 break
-
-if __name__ == "__main__":
-    import sys
-    
-    if len(sys.argv) >= 3:
-        peer_host = sys.argv[1]
-        peer_port = int(sys.argv[2])
-        controller = PeerController(peer_host=peer_host, peer_port=peer_port)
-    else:
-        controller = PeerController()
-    
-    controller.console_gui()
