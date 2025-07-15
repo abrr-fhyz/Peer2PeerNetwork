@@ -5,17 +5,21 @@ import streamlit as st
 import socket
 import json
 import requests
+from dotenv import load_dotenv
 from util.file_processor import FileProcessor
-from util.dht_node import DHT
-from util.peer_node import Peer
-from util.peer_controller import PeerController
+from util.peer_controller import PeerController 
 
-# Configuration
-HOST_IP = "localhost" 
+load_dotenv()
+
+HOST_IP = os.getenv("HOST_IP", "localhost")
+HOST_PORT = int(os.getenv("HOST_PORT", "9001"))
+DHT_PORT = int(os.getenv("DHT_PORT", "8000"))
+API_PORT = int(os.getenv("API_PORT", "8080"))
 OUTPUT_DIR = "processed_videos"
 CHUNK_SIZE = 1024 * 1024  # 1MB chunks
-MIN_BUFFER_CHUNKS = 5 
+MIN_BUFFER_CHUNKS = 5  # Start playback after this many chunks are buffered
 
+# Load external CSS and HTML
 def load_css():
     """Load CSS from external file"""
     try:
@@ -51,7 +55,7 @@ class VideoStreamer:
 def check_streaming_server():
     """Check if streaming server is available"""
     try:
-        response = requests.get(f"http://{HOST_IP}:8080/api/videos", timeout=2)
+        response = requests.get(f"http://{HOST_IP}:{API_PORT}/api/videos", timeout=2)
         return response.status_code == 200
     except:
         return False
@@ -59,7 +63,7 @@ def check_streaming_server():
 def get_videos_from_server():
     """Get videos from streaming server"""
     try:
-        response = requests.get(f"http://{HOST_IP}:8080/api/videos", timeout=5)
+        response = requests.get(f"http://{HOST_IP}:{API_PORT}/api/videos", timeout=5)
         if response.status_code == 200:
             return response.json()
     except:
@@ -69,7 +73,7 @@ def get_videos_from_server():
 def get_streaming_status(video_id):
     """Get streaming status for a video"""
     try:
-        response = requests.get(f"http://{HOST_IP}:8080/api/stream-status/{video_id}", timeout=2)
+        response = requests.get(f"http://{HOST_IP}:{API_PORT}/api/stream-status/{video_id}", timeout=2)
         if response.status_code == 200:
             return response.json()
     except:
@@ -79,7 +83,7 @@ def get_streaming_status(video_id):
 def trigger_stream(video_id):
     """Trigger stream initialization by sending HEAD request"""
     try:
-        response = requests.head(f"http://{HOST_IP}:8080/stream/{video_id}", timeout=10)
+        response = requests.head(f"http://{HOST_IP}:{API_PORT}/stream/{video_id}", timeout=10)
         return response.status_code in [200, 206]
     except Exception as e:
         print(f"Failed to trigger stream: {e}")
@@ -89,7 +93,7 @@ def upload_video_to_server(uploaded_file):
     """Upload video file to streaming server"""
     try:
         files = {"file": (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)}
-        response = requests.post(f"http://{HOST_IP}:8080/upload", files=files, timeout=300)  # 5 min timeout
+        response = requests.post(f"http://{HOST_IP}:{API_PORT}/upload", files=files, timeout=300)  # 5 min timeout
         
         if response.status_code == 200:
             return response.json()
@@ -112,9 +116,9 @@ def main():
                     # Use PeerController to manage single peer
                     st.session_state.peer_controller = PeerController(
                         peer_host=HOST_IP, 
-                        peer_port=9001,  # Single peer on port 9001
+                        peer_port=HOST_PORT,  # Use HOST_PORT from env
                         dht_host=HOST_IP, 
-                        dht_port=8000
+                        dht_port=DHT_PORT
                     )
                     st.session_state.peer_controller.start_services()
                     st.session_state.streamer = VideoStreamer()
@@ -136,7 +140,7 @@ def main():
         # System info
         if st.session_state.get('components_started', False):
             st.info("📡 DHT Node: Active")
-            st.info("🔗 Peer Node: 1 active (discovering others)")
+            st.info("🔗 Peer Node: active (discovering others)")
         
         if st.button("🔄 Refresh Status"):
             st.rerun()
@@ -157,7 +161,7 @@ def main():
                 try:
                     # Use peer_controller's list_videos method
                     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-                        sock.connect((HOST_IP, 8000))
+                        sock.connect((HOST_IP, DHT_PORT))
                         message = {'type': 'get_videos'}
                         sock.send(json.dumps(message).encode())
 
@@ -234,7 +238,7 @@ def main():
                             status_placeholder.success("✅ Stream ready! Starting playback...")
                             
                             # Show video player
-                            streaming_url = f"http://{HOST_IP}:8080/stream/{video_id}"
+                            streaming_url = f"http://{HOST_IP}:{API_PORT}/stream/{video_id}"
                             st.video(streaming_url)
                             
                             # Control buttons
@@ -353,7 +357,7 @@ def main():
                     if st.button("🧪 Test Stream"):
                         test_video_id = video_options[selected_video]
                         try:
-                            response = requests.head(f"http://{HOST_IP}:8081/stream/{test_video_id}", timeout=5)
+                            response = requests.head(f"http://{HOST_IP}:{API_PORT}/stream/{test_video_id}", timeout=5)
                             st.success(f"✅ Stream test successful: {response.status_code}")
                             
                             # Check status
@@ -408,7 +412,7 @@ def main():
         if st.button("📡 Call API"):
             if server_running:
                 try:
-                    response = requests.get(f"http://{HOST_IP}:8080{api_endpoint}")
+                    response = requests.get(f"http://{HOST_IP}:{API_PORT}{api_endpoint}")
                     st.write(f"**Status:** {response.status_code}")
                     st.json(response.json())
                 except Exception as e:

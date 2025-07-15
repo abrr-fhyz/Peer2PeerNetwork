@@ -515,5 +515,13 @@ def load_html():
 
 if __name__ == "__main__":
     import uvicorn
+    from dotenv import load_dotenv
+    import os
+    
+    load_dotenv()
+    
+    HOST_IP = os.getenv("HOST_IP", "localhost")
+    API_PORT = int(os.getenv("API_PORT", "8080"))
+        
     logger.info("[Server] Starting FIXED seeking progressive streaming server...")
-    uvicorn.run(app, host="0.0.0.0", port=8080)
+    uvicorn.run(app, host=HOST_IP, port=API_PORT)

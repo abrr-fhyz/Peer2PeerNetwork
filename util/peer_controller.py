@@ -33,9 +33,12 @@ class PeerController:
         raise Exception("Failed to receive complete message")
 
     def start_services(self):
-        self.dht = DHT(self.dht_host, self.dht_port)
-        self.dht.start()
-        time.sleep(1)
+        if not self.is_port_in_use(self.dht_host, self.dht_port):
+            self.dht = DHT(self.dht_host, self.dht_port)
+            self.dht.start()
+            time.sleep(1)  
+        else:
+            print(f"DHT is already running on {self.dht_host}:{self.dht_port}, skipping...")
         
         self.peer = Peer(host=self.peer_host, port=self.peer_port, 
                         dht_host=self.dht_host, dht_port=self.dht_port)
@@ -153,31 +156,11 @@ class PeerController:
                 for chunk_data in chunks_data:
                     f.write(chunk_data)
     
-    def console_gui(self):
-        print("=== NetFlacks Peer Controller ===")
-        self.start_services()
-        
-        while self.running:
-            print("\n--- Menu ---")
-            print("1. Upload Video")
-            print("2. List Videos")
-            print("3. Download Video")
-            print("4. Quit")
-            
-            choice = input("Enter choice (1-4): ").strip()
-            
-            if choice == '1':
-                video_path = input("Enter video file path: ").strip()
-                self.upload_video(video_path)
-            
-            elif choice == '2':
-                self.list_videos()
-            
-            elif choice == '3':
-                video_id = input("Enter video ID: ").strip()
-                output_path = input("Enter output file path: ").strip()
-                self.download_video(video_id, output_path)
-            
-            elif choice == '4':
-                self.stop_services()
-                break
+    def is_port_in_use(self, host, port):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.settimeout(1)  
+                s.connect((host, port))
+                return True 
+            except (socket.timeout, ConnectionRefusedError):
+                return False 
