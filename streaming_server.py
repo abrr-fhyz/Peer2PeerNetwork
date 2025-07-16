@@ -36,7 +36,7 @@ async def list_videos():
     logger.info("[API] Listing videos from DHT...")
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.connect(('localhost', 8000))
+            sock.connect((HOST_IP, 8000))
             message = {'type': 'get_videos'}
             sock.send(json.dumps(message).encode())
             
@@ -161,7 +161,7 @@ def download_chunk_sync(chunk_hash: str):
     try:
         # Get chunk location from DHT
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.connect(('localhost', 8000))
+            sock.connect((HOST_IP, 8000))
             message = {'type': 'find_chunk', 'chunk_hash': chunk_hash}
             sock.send(json.dumps(message).encode())
             
@@ -258,7 +258,7 @@ async def initialize_stream(video_id: str):
     try:
         # Get chunk information from DHT
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.connect(('localhost', 8000))
+            sock.connect((HOST_IP, 8000))
             message = {'type': 'get_video_chunks', 'video_id': video_id}
             sock.send(json.dumps(message).encode())
             
@@ -412,7 +412,7 @@ async def upload_video(file: UploadFile = File(...)):
 
         # Register with DHT
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.connect(('localhost', 8000))
+            sock.connect((HOST_IP, 8000))
             message = {
                 'type': 'add_video',
                 'video_id': metadata.video_id,
@@ -461,7 +461,7 @@ async def distribute_chunks_to_peers(metadata):
         try:
             # Get placement from DHT
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-                sock.connect(('localhost', 8000))
+                sock.connect((HOST_IP, 8000))
                 message = {
                     'type': 'get_placement',
                     'chunk_hash': chunk_info['hash']
